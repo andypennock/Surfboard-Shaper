@@ -335,7 +335,7 @@ function loop(){renderer.render(scene,camera);requestAnimationFrame(loop);}
 addEventListener('resize',()=>{resize();redrawActive();});
 document.querySelectorAll('.vbtns button').forEach(b=>b.onclick=()=>{const m=b.dataset.cam;
   if(m==='iso')camAng={az:-0.9,el:0.5,r:2600};if(m==='top')camAng={az:-Math.PI/2,el:1.39,r:2600};
-  if(m==='side')camAng={az:0,el:0.02,r:2600};if(m==='end')camAng={az:-Math.PI/2,el:0.02,r:1600};applyCam();});
+  if(m==='side')camAng={az:Math.PI/2,el:0.02,r:2600};if(m==='end')camAng={az:0,el:0.02,r:1600};applyCam();});
 
 /* ============================================================
    DIMENSIONS
