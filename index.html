@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shaper — Parametric Board v0.2</title>
+<title>Shaper — Parametric Board v0.5</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
   :root{
@@ -20,6 +20,9 @@
   .hd{padding:13px 16px 9px;border-bottom:1px solid var(--line)}
   .hd h1{margin:0;font-size:13px;letter-spacing:.18em;text-transform:uppercase;font-weight:600}
   .hd .sub{margin-top:3px;font-size:11px;color:var(--dim);font-family:var(--mono)}
+  .hd .lenrow{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;font-family:var(--mono);color:var(--dim)}
+  .hd .lenrow input{width:74px;background:var(--panel2);border:1px solid var(--line);color:var(--active);
+    font-family:var(--mono);font-size:11px;padding:3px 6px;border-radius:2px;text-align:right}
   .tabs{display:flex;border-bottom:1px solid var(--line)}
   .tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;
     color:var(--dim);padding:9px 4px;font-size:11px;letter-spacing:.04em;cursor:pointer;
@@ -82,11 +85,12 @@
 
 <div id="panel">
   <div class="hd"><h1>Shaper</h1>
-    <div class="sub">datum · tail X0 · stringer Y0 · baseline Z0</div></div>
+    <div class="sub">datum · tail X0 · stringer Y0 · baseline Z0</div>
+    <div class="lenrow"><span>Length</span><input id="board-length" type="number"><span>mm</span></div>
+  </div>
   <div class="tabs">
     <button data-tab="outline" class="on">Outline</button>
-    <button data-tab="rocker">Rocker</button>
-    <button data-tab="thick">Foil</button>
+    <button data-tab="rocker">Profile</button>
     <button data-tab="sect">Sections</button>
   </div>
   <div class="handlebar">
@@ -104,21 +108,19 @@
       <div class="ctlrow"><button data-add="outline">+ point</button><button data-del="outline">− point</button></div>
     </div>
     <div class="editor" id="ed-rocker">
+      <div class="stationtabs" id="profile-tabs">
+        <button class="on" data-profile="bottom">Bottom</button>
+        <button data-profile="deck">Deck</button>
+      </div>
       <canvas id="cv-rocker"></canvas>
-      <div class="ehint">Side profile (bottom of board). <b>Z</b> = height above the lowest point (baseline). Drag points and handles for nose/tail lift and flow.</div>
+      <div class="ehint"><b>Bottom</b> = rocker (board underside). <b>Deck</b> = top surface (rocker + thickness). Endpoints locked to board length.</div>
       <div class="nodebar"><span class="tag">pt</span>
         <span class="tag">X</span><input id="rb-x">
-        <span class="tag">Z</span><input id="rb-v"></div>
-      <div class="ctlrow"><button data-add="rocker">+ point</button><button data-del="rocker">− point</button></div>
+        <span class="tag" id="rb-v-label">Z</span><input id="rb-v"></div>
+      <div class="ctlrow"><button id="profile-add">+ point</button><button id="profile-del">− point</button></div>
     </div>
-    <div class="editor" id="ed-thick">
-      <canvas id="cv-thick"></canvas>
-      <div class="ehint">Centreline thickness — the foil. Drag points and handles to set where the volume sits along the length.</div>
-      <div class="nodebar"><span class="tag">pt</span>
-        <span class="tag">X</span><input id="tb-x">
-        <span class="tag">T</span><input id="tb-v"></div>
-      <div class="ctlrow"><button data-add="thick">+ point</button><button data-del="thick">− point</button></div>
-    </div>
+    <!-- thick editor kept hidden; used internally by profile view -->
+    <div id="ed-thick" style="display:none"><canvas id="cv-thick" style="width:1px;height:1px"></canvas></div>
     <div class="editor" id="ed-sect">
       <div class="stationtabs" id="station-tabs"></div>
       <canvas id="cv-sect"></canvas>
@@ -172,14 +174,14 @@ function curveFn(nodes){
     let p1x=A.x+A.hrx, p1v=A.v+A.hrv;
     let p2x=B.x+B.hlx, p2v=B.v+B.hlv;
     const p3x=B.x,p3v=B.v;
-    p1x=Math.min(Math.max(p1x,p0x),p3x);   // keep x monotonic
+    p1x=Math.min(Math.max(p1x,p0x),p3x);
     p2x=Math.min(Math.max(p2x,p0x),p3x);
     let lo=0,hi=1;
     for(let k=0;k<32;k++){const t=(lo+hi)/2; if(bz(p0x,p1x,p2x,p3x,t)<x)lo=t;else hi=t;}
     return bz(p0v,p1v,p2v,p3v,(lo+hi)/2);
   };
 }
-function samplePoly(nodes,perSeg){ // [{x,v}] for drawing
+function samplePoly(nodes,perSeg){
   const out=[];
   for(let i=0;i<nodes.length-1;i++){
     const A=nodes[i],B=nodes[i+1];
@@ -198,12 +200,10 @@ const board = {
   outline: autoHandles([{x:0,v:150},{x:300,v:300},{x:950,v:485},{x:1550,v:360},{x:1880,v:110}]),
   rocker:  autoHandles([{x:0,v:42},{x:350,v:8},{x:850,v:0},{x:1350,v:22},{x:1880,v:132}]),
   thick:   autoHandles([{x:0,v:14},{x:300,v:54},{x:980,v:73},{x:1520,v:52},{x:1880,v:11}]),
-  // sections: each station has editable deck & bottom normalised curves
-  // x in 0..1 = fraction of half-width (stringer→rail); v = fraction of thickness
   sections: [
-    mkSection(120, [[0,1],[0.6,0.78],[1,0.42]], [[0,0],[0.5,-0.04],[1,0.42]]), // tail: vee
-    mkSection(980, [[0,1],[0.6,0.82],[1,0.5]],  [[0,0],[0.5,0.06],[1,0.5]]),   // mid: concave, round rail
-    mkSection(1760,[[0,1],[0.6,0.9],[1,0.6]],   [[0,0],[0.5,0.0],[1,0.6]]),    // nose: full deck
+    mkSection(120, [[0,1],[0.6,0.78],[1,0.42]], [[0,0],[0.5,-0.04],[1,0.42]]),
+    mkSection(980, [[0,1],[0.6,0.82],[1,0.5]],  [[0,0],[0.5,0.06],[1,0.5]]),
+    mkSection(1760,[[0,1],[0.6,0.9],[1,0.6]],   [[0,0],[0.5,0.0],[1,0.6]]),
   ],
 };
 function mkSection(x,deckPts,botPts){
@@ -214,14 +214,20 @@ function mkSection(x,deckPts,botPts){
 let activeSection=1;
 const len=()=>board.outline[board.outline.length-1].x;
 
-/* section profile sampled to a u-grid, smoothly interpolated along length */
+/* Ensure rocker/thick endpoints always sit at x=0 and x=len() */
+function syncEndpoints(){
+  const L=len();
+  board.rocker[0].x=0; board.rocker[board.rocker.length-1].x=L;
+  board.thick[0].x=0;  board.thick[board.thick.length-1].x=L;
+}
+
 const UG=24;
 function sampleSection(s){
   const fd=curveFn(s.deck), fb=curveFn(s.bot), d=[],b=[];
   for(let k=0;k<=UG;k++){const u=k/UG; d.push(fd(u)); b.push(fb(u));}
   return {d,b};
 }
-let _S=null;                       // cache of sampled stations (only depends on sections)
+let _S=null;
 function invalidateSections(){ _S=null; }
 function getS(){ if(!_S) _S=[...board.sections].sort((a,b)=>a.x-b.x).map(s=>({x:s.x,...sampleSection(s)})); return _S; }
 function cr(p0,p1,p2,p3,t){const t2=t*t,t3=t2*t;
@@ -278,16 +284,17 @@ function initGL(){
 function addAxis(a,b,c){const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a),new THREE.Vector3(...b)]);
   scene.add(new THREE.Line(g,new THREE.LineBasicMaterial({color:c})));}
 function rebuild(){
+  syncEndpoints();
   const fW=curveFn(board.outline),fR=curveFn(board.rocker),fT=curveFn(board.thick);
   const L=len(),NX=90;
   const rings=[];
   for(let i=0;i<=NX;i++){
     const x=i/NX*L,halfW=fW(x)/2,t=fT(x),b=fR(x),pr=profileAt(x);
     const loop=[];
-    for(let k=0;k<=UG;k++)loop.push([x,b+t*pr.b[k], halfW*k/UG]);    // R bottom
-    for(let k=UG;k>=0;k--)loop.push([x,b+t*pr.d[k], halfW*k/UG]);    // R deck
-    for(let k=0;k<=UG;k++)loop.push([x,b+t*pr.d[k],-halfW*k/UG]);    // L deck
-    for(let k=UG;k>=0;k--)loop.push([x,b+t*pr.b[k],-halfW*k/UG]);    // L bottom
+    for(let k=0;k<=UG;k++)loop.push([x,b+t*pr.b[k], halfW*k/UG]);
+    for(let k=UG;k>=0;k--)loop.push([x,b+t*pr.d[k], halfW*k/UG]);
+    for(let k=0;k<=UG;k++)loop.push([x,b+t*pr.d[k],-halfW*k/UG]);
+    for(let k=UG;k>=0;k--)loop.push([x,b+t*pr.b[k],-halfW*k/UG]);
     rings.push(loop);
   }
   const P=rings[0].length, verts=[], idx=[];
@@ -295,7 +302,7 @@ function rebuild(){
   for(let i=0;i<NX;i++)for(let j=0;j<P;j++){const j2=(j+1)%P;
     const a=i*P+j,b=(i+1)*P+j,c=i*P+j2,d=(i+1)*P+j2;
     idx.push(a,b,c, c,b,d);}
-  for(const [ri,flip] of [[0,false],[NX,true]]){           // smooth end caps
+  for(const [ri,flip] of [[0,false],[NX,true]]){
     const ring=rings[ri],ci=verts.length/3;
     verts.push(avg(ring,0),avg(ring,1),avg(ring,2));
     for(let j=0;j<P;j++){const j2=(j+1)%P,a=ri*P+j,b=ri*P+j2;
@@ -356,19 +363,18 @@ const set=(id,h)=>document.getElementById(id).innerHTML=h;
 function ftin(mm){const inch=mm/25.4,ft=Math.floor(inch/12);return `${ft}'${(inch-ft*12).toFixed(1)}"`;}
 
 /* ============================================================
-   GENERIC 2D CURVE EDITOR (outline / rocker / thick)
+   OUTLINE EDITOR (generic 2D curve editor, outline only)
    ============================================================ */
 const EDS={
   outline:{cv:'cv-outline',data:()=>board.outline,mirror:true, vmax:600, min:10, xb:'ob-x',vb:'ob-v',lockEndsX:true},
-  rocker: {cv:'cv-rocker', data:()=>board.rocker, mirror:false,vmax:200, min:0,  xb:'rb-x',vb:'rb-v',lockEndsX:false},
-  thick:  {cv:'cv-thick',  data:()=>board.thick,  mirror:false,vmax:300, min:1,  xb:'tb-x',vb:'tb-v',lockEndsX:false, silhouette:true},
+  rocker: {cv:'cv-rocker', data:()=>board.rocker, mirror:false,vmax:200, min:0,  xb:'rb-x',vb:'rb-v',lockEndsX:true},
+  thick:  {cv:'cv-thick',  data:()=>board.thick,  mirror:false,vmax:300, min:1,  xb:'tb-x',vb:'tb-v',lockEndsX:true, silhouette:true},
 };
 let sel={outline:1,rocker:2,thick:2};
 let drag=null;
-let handleLock='free';   // 'free' | 'vert' | 'horiz' (screen axes)
+let handleLock='free';
 function lockDelta(dx,dv){return handleLock==='vert'?[0,dv]:handleLock==='horiz'?[dx,0]:[dx,dv];}
 function enforceSmooth(node,dragged,sx,sy){
-  // make the OTHER handle collinear & opposite in SCREEN space, preserving its screen length
   const dX=dragged==='hr'?node.hrx:node.hlx, dV=dragged==='hr'?node.hrv:node.hlv, tgt=dragged==='hr'?'hl':'hr';
   const dsx=dX*sx, dsy=dV*sy, dmag=Math.hypot(dsx,dsy)||1;
   const ux=-dsx/dmag, uy=-dsy/dmag;
@@ -376,10 +382,18 @@ function enforceSmooth(node,dragged,sx,sy){
   node[tgt+'x']=(ux*tlen)/sx; node[tgt+'v']=(uy*tlen)/sy;
 }
 function activeTab(){const b=document.querySelector('.tabs button.on');return b?b.dataset.tab:'outline';}
-function currentNode(){const t=activeTab();
+function currentNode(){
+  const t=activeTab();
   if(t==='sect'){const s=board.sections[activeSection];return (secSel.curve==='deck'?s.deck:s.bot)[secSel.i];}
-  return EDS[t]?EDS[t].data()[sel[t]]:null;}
-function currentScales(){const t=activeTab();const M=(t==='sect')?secMapper():mapper(t);return [M.X(1)-M.X(0),M.Y(1)-M.Y(0)];}
+  if(t==='rocker'){return profileCurve==='bottom'?board.rocker[sel.rocker]:board.thick[sel.thick];}
+  return EDS[t]?EDS[t].data()[sel[t]]:null;
+}
+function currentScales(){
+  const t=activeTab();
+  if(t==='sect'){const M=secMapper();return [M.X(1)-M.X(0),M.Y(1)-M.Y(0)];}
+  if(t==='rocker'){const M=profileMapper();return [M.X(1)-M.X(0),M.Y(1)-M.Y(0)];}
+  const M=mapper(t);return [M.X(1)-M.X(0),M.Y(1)-M.Y(0)];
+}
 function syncHandleUI(){const n=currentNode(),cb=document.getElementById('cb-parallel');if(cb)cb.checked=!!(n&&n.smooth);}
 
 function mapper(name){
@@ -399,28 +413,19 @@ function drawEditor(name){
   cv.width=w*dpr; cv.height=h*dpr;
   const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
   g.font='9px monospace';
-  const ref=E.silhouette?curveFn(board.rocker):null;     // foil shown as deck = rocker + thickness
+  const ref=E.silhouette?curveFn(board.rocker):null;
   const vv=(x,v)=>ref?ref(x)+v:v;
-  // grid
   g.strokeStyle='#18242b';g.fillStyle='#5e7079';
   for(let gx=0;gx<=L+1;gx+=250){g.beginPath();g.moveTo(X(gx),M.pad.t);g.lineTo(X(gx),h-M.pad.b);g.stroke();g.fillText(gx,X(gx)-6,h-8);}
-  // datums
   g.strokeStyle='#3a5260';g.setLineDash([4,3]);
   g.beginPath();g.moveTo(X(0),M.pad.t);g.lineTo(X(0),h-M.pad.b);g.stroke();
   g.beginPath();g.moveTo(M.pad.l,base);g.lineTo(w-M.pad.r,base);g.stroke();g.setLineDash([]);
-  g.fillText(name==='rocker'?'baseline':(E.mirror?'⌀ stringer':(E.silhouette?'baseline':'0')),4,base+3);
+  g.fillText(E.mirror?'⌀ stringer':'0',4,base+3);
   g.fillText('tail',X(0)+2,M.pad.t+8);
-  // bottom (rocker) reference line for the foil view
-  if(ref){g.strokeStyle='#46606e';g.lineWidth=1.5;g.beginPath();
-    for(let i=0;i<=120;i++){const x=i/120*L,px=X(x),py=Y(ref(x));i?g.lineTo(px,py):g.moveTo(px,py);}g.stroke();
-    g.fillStyle='#5e7079';g.fillText('bottom (rocker)',X(L*0.5),Y(ref(L*0.5))+12);}
-  // main curve (deck line, or value curve)
   const data=E.data(), poly=samplePoly(data,40);
   g.strokeStyle='#34d3c0';g.lineWidth=2;g.beginPath();
   poly.forEach((p,i)=>{const px=X(p.x),py=Y(vv(p.x,p.v));i?g.lineTo(px,py):g.moveTo(px,py);});g.stroke();
   if(E.mirror){g.beginPath();poly.forEach((p,i)=>{const px=X(p.x),py=base+(base-Y(p.v));i?g.lineTo(px,py):g.moveTo(px,py);});g.stroke();}
-  if(ref){g.fillStyle='#5e7079';g.fillText('deck',X(L*0.5),Y(vv(L*0.5,curveFn(data)(L*0.5)))-8);}
-  // nodes + handles of selected
   const si=sel[name];
   data.forEach((p,i)=>{
     const px=X(p.x),py=Y(vv(p.x,p.v)),on=(si===i);
@@ -439,70 +444,324 @@ function drawEditor(name){
 }
 function pointer(name,e){
   const M=mapper(name); const {cv,X,Y,invX,invV,L,VM}=M, E=EDS[name], data=E.data();
-  const ref=E.silhouette?curveFn(board.rocker):null;
-  const off=x=>ref?ref(x):0;                     // vertical reference (rocker) for the foil view
   const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
   if(e.type==='pointerdown'){
     const si=sel[name], p=data[si];
     if(p){for(const k of ['hl','hr']){
       const dv=(k==='hl'?p.hlv:p.hrv),dx=(k==='hl'?p.hlx:p.hrx);
-      const hx=X(p.x+dx),hy=Y(off(p.x+dx)+p.v+dv);
+      const hx=X(p.x+dx),hy=Y(p.v+dv);
       if(Math.hypot(hx-mx,hy-my)<10){drag={name,i:si,h:k};return;}
     }}
-    let best=-1,bd=1e9;data.forEach((p,i)=>{const d=Math.hypot(X(p.x)-mx,Y(off(p.x)+p.v)-my);if(d<bd){bd=d;best=i;}});
-    if(bd<16){sel[name]=best;drag={name,i:best,h:null};syncBar(name);syncHandleUI();drawEditor(name);}
+    let best=-1,bd=1e9;data.forEach((p,i)=>{const d=Math.hypot(X(p.x)-mx,Y(p.v)-my);if(d<bd){bd=d;best=i;}});
+    if(bd<16){sel[name]=best;drag={name,i:best,h:null};syncOutlineBar();syncHandleUI();drawEditor(name);}
   } else if(e.type==='pointermove'&&drag&&drag.name===name){
     const p=data[drag.i];
     if(drag.h){
-      let dx=invX(mx)-p.x, dv=invV(my)-(off(p.x)+p.v);
+      let dx=invX(mx)-p.x, dv=invV(my)-p.v;
       [dx,dv]=lockDelta(dx,dv);
       if(drag.h==='hr'){dx=Math.max(0,dx); if(drag.i<data.length-1)dx=Math.min(dx,data[drag.i+1].x-p.x);}
       else {dx=Math.min(0,dx); if(drag.i>0)dx=Math.max(dx,data[drag.i-1].x-p.x);}
       if(drag.h==='hr'){p.hrx=dx;p.hrv=dv;} else {p.hlx=dx;p.hlv=dv;}
-      if(p.smooth){const sx=M.X(1)-M.X(0),sy=M.Y(1)-M.Y(0);enforceSmooth(p,drag.h,sx,sy);}
+      if(p.smooth){enforceSmooth(p,drag.h,M.X(1)-M.X(0),M.Y(1)-M.Y(0));}
     } else {
       const isEnd=(drag.i===0||drag.i===data.length-1);
       if(!(isEnd&&E.lockEndsX)) p.x=clamp(invX(mx),0,L);
-      p.v=clamp(invV(my)-off(p.x),E.min,VM*1.05);
+      p.v=clamp(invV(my),E.min,VM*1.05);
       keepSorted(data,drag.i);
     }
-    rebuild();drawEditor(name);syncBar(name);
+    rebuild();drawEditor(name);syncOutlineBar();
   } else if(e.type==='pointerup'){drag=null;}
 }
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function keepSorted(d,i){if(i>0)d[i].x=Math.max(d[i].x,d[i-1].x+5);if(i<d.length-1)d[i].x=Math.min(d[i].x,d[i+1].x-5);}
-function syncBar(name){
-  const E=EDS[name],p=E.data()[sel[name]];if(!p)return;
-  const xi=document.getElementById(E.xb),vi=document.getElementById(E.vb);
-  xi.value=p.x.toFixed(0);vi.value=p.v.toFixed(1);
-  xi.disabled=(E.lockEndsX&&(sel[name]===0||sel[name]===E.data().length-1));
+function syncOutlineBar(){
+  const E=EDS.outline, p=E.data()[sel.outline]; if(!p)return;
+  const xi=document.getElementById(E.xb), vi=document.getElementById(E.vb);
+  xi.value=p.x.toFixed(0); vi.value=p.v.toFixed(1);
+  xi.disabled=(sel.outline===0||sel.outline===E.data().length-1);
 }
-['outline','rocker','thick'].forEach(name=>{
-  const E=EDS[name];
-  ['x','v'].forEach(f=>{document.getElementById(f==='x'?E.xb:E.vb).onchange=ev=>{
-    const p=E.data()[sel[name]],val=parseFloat(ev.target.value);
-    if(!isNaN(val)){p[f]=val;keepSorted(E.data(),sel[name]);rebuild();drawEditor(name);syncBar(name);}};});
-});
+const E_ol=EDS.outline;
+['x','v'].forEach(f=>{document.getElementById(f==='x'?E_ol.xb:E_ol.vb).onchange=ev=>{
+  const p=E_ol.data()[sel.outline],val=parseFloat(ev.target.value);
+  if(!isNaN(val)){p[f]=val;keepSorted(E_ol.data(),sel.outline);rebuild();drawEditor('outline');syncOutlineBar();}};});
 document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{
   const name=b.dataset.add,d=EDS[name].data(),i=Math.max(1,Math.min(sel[name]+1,d.length-1));
   const nx=(d[i-1].x+d[i].x)/2,nv=curveFn(d)(nx);
-  d.splice(i,0,autoHandles([{x:nx,v:nv}])[0]);sel[name]=i;rebuild();drawEditor(name);syncBar(name);
+  d.splice(i,0,autoHandles([{x:nx,v:nv}])[0]);sel[name]=i;rebuild();drawEditor(name);syncOutlineBar();
 });
 document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
   const name=b.dataset.del,d=EDS[name].data(),s=sel[name];
-  if(s>0&&s<d.length-1&&d.length>3){d.splice(s,1);sel[name]=Math.max(1,s-1);rebuild();drawEditor(name);syncBar(name);}
+  if(s>0&&s<d.length-1&&d.length>3){d.splice(s,1);sel[name]=Math.max(1,s-1);rebuild();drawEditor(name);syncOutlineBar();}
 });
 
 /* ============================================================
-   SECTION EDITOR — editable deck + bottom curves with handles
+   COMBINED PROFILE EDITOR (rocker + thickness on one canvas)
+   ============================================================ */
+let profileCurve='bottom'; // 'bottom' | 'deck'
+
+function profileMapper(){
+  const cv=document.getElementById('cv-rocker');
+  const w=cv.clientWidth, h=cv.clientHeight, pad={l:44,r:16,t:16,b:26};
+  const L=Math.max(len(),100);
+  const fR=curveFn(board.rocker), fT=curveFn(board.thick);
+  let vmax=10;
+  for(let x=0;x<=L;x+=20) vmax=Math.max(vmax, fR(x)+fT(x));
+  vmax=Math.ceil(vmax*1.18/50)*50; // round up to nearest 50mm with margin
+  const X=x=>pad.l+(x/L)*(w-pad.l-pad.r);
+  const base=h-pad.b;
+  const Y=v=>base-(v/vmax)*(h-pad.t-pad.b);
+  const invX=px=>(px-pad.l)/(w-pad.l-pad.r)*L;
+  const invV=py=>(base-py)/(h-pad.t-pad.b)*vmax;
+  return {cv,w,h,pad,L,vmax,X,Y,base,invX,invV};
+}
+
+function drawProfile(){
+  const M=profileMapper();
+  const {cv,w,h,X,Y,L,base}=M;
+  const dpr=Math.min(devicePixelRatio,2);
+  cv.width=w*dpr; cv.height=h*dpr;
+  const g=cv.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  g.font='9px monospace';
+
+  const fR=curveFn(board.rocker), fT=curveFn(board.thick);
+
+  // Grid
+  g.strokeStyle='#18242b'; g.fillStyle='#5e7079';
+  for(let gx=0;gx<=L+1;gx+=250){
+    g.beginPath();g.moveTo(X(gx),M.pad.t);g.lineTo(X(gx),h-M.pad.b);g.stroke();
+    g.fillText(gx,X(gx)-6,h-8);
+  }
+
+  // Datums
+  g.strokeStyle='#3a5260'; g.setLineDash([4,3]);
+  g.beginPath();g.moveTo(X(0),M.pad.t);g.lineTo(X(0),h-M.pad.b);g.stroke();
+  g.beginPath();g.moveTo(M.pad.l,Y(0));g.lineTo(w-M.pad.r,Y(0));g.stroke();
+  g.setLineDash([]);
+  g.fillStyle='#5e7079';
+  g.fillText('baseline',4,Y(0)-3);
+  g.fillText('tail',X(0)+2,M.pad.t+8);
+
+  // Shaded fill between bottom and deck
+  const rPoly=samplePoly(board.rocker,40), tPoly=samplePoly(board.thick,40);
+  g.globalAlpha=0.07; g.fillStyle='#34d3c0';
+  g.beginPath();
+  rPoly.forEach((p,i)=>{i?g.lineTo(X(p.x),Y(p.v)):g.moveTo(X(p.x),Y(p.v));});
+  [...tPoly].reverse().forEach(p=>g.lineTo(X(p.x),Y(fR(p.x)+p.v)));
+  g.closePath(); g.fill(); g.globalAlpha=1;
+
+  // Bottom curve (rocker)
+  g.strokeStyle='#34d3c0'; g.lineWidth=profileCurve==='bottom'?2.5:1.5;
+  g.beginPath();
+  rPoly.forEach((p,i)=>{i?g.lineTo(X(p.x),Y(p.v)):g.moveTo(X(p.x),Y(p.v));});
+  g.stroke();
+  g.fillStyle='#5e7079';
+  g.fillText('bottom',X(L*0.5)+4,Y(fR(L*0.5))-6);
+
+  // Deck curve (rocker + thick)
+  g.strokeStyle='#7fd4ff'; g.lineWidth=profileCurve==='deck'?2.5:1.5;
+  g.beginPath();
+  tPoly.forEach((p,i)=>{const py=Y(fR(p.x)+p.v); i?g.lineTo(X(p.x),py):g.moveTo(X(p.x),py);});
+  g.stroke();
+  g.fillText('deck',X(L*0.5)+4,Y(fR(L*0.5)+fT(L*0.5))+12);
+
+  // Rocker nodes
+  const rSi=sel.rocker;
+  board.rocker.forEach((p,i)=>{
+    const px=X(p.x), py=Y(p.v), on=(profileCurve==='bottom'&&rSi===i);
+    if(on){
+      [['hl',p.hlx,p.hlv],['hr',p.hrx,p.hrv]].forEach(([,dx,dv],k)=>{
+        if((i===0&&k===0)||(i===board.rocker.length-1&&k===1))return;
+        const hx=X(p.x+dx), hy=Y(p.v+dv);
+        g.strokeStyle='#7fd4ff';g.lineWidth=1;g.beginPath();g.moveTo(px,py);g.lineTo(hx,hy);g.stroke();
+        g.fillStyle='#7fd4ff';g.fillRect(hx-3,hy-3,6,6);
+      });
+    }
+    g.fillStyle=on?'#ffb454':'#34d3c0';
+    g.beginPath();g.arc(px,py,on?5:3.5,0,7);g.fill();
+    if(p.smooth){g.strokeStyle=on?'#ffb454':'#34d3c0';g.lineWidth=1;g.beginPath();g.arc(px,py,on?8:6.5,0,7);g.stroke();}
+  });
+
+  // Thick (deck) nodes — displayed at absolute height rocker+thick
+  const tSi=sel.thick;
+  board.thick.forEach((p,i)=>{
+    const px=X(p.x), py=Y(fR(p.x)+p.v), on=(profileCurve==='deck'&&tSi===i);
+    if(on){
+      [['hl',p.hlx,p.hlv],['hr',p.hrx,p.hrv]].forEach(([,dx,dv],k)=>{
+        if((i===0&&k===0)||(i===board.thick.length-1&&k===1))return;
+        const hx=X(p.x+dx), hy=Y(fR(p.x+dx)+p.v+dv);
+        g.strokeStyle='#ffb454';g.lineWidth=1;g.beginPath();g.moveTo(px,py);g.lineTo(hx,hy);g.stroke();
+        g.fillStyle='#ffb454';g.fillRect(hx-3,hy-3,6,6);
+      });
+    }
+    g.fillStyle=on?'#ffb454':'#7fd4ff';
+    g.beginPath();g.arc(px,py,on?5:3.5,0,7);g.fill();
+    if(p.smooth){g.strokeStyle=on?'#ffb454':'#7fd4ff';g.lineWidth=1;g.beginPath();g.arc(px,py,on?8:6.5,0,7);g.stroke();}
+  });
+  cv._M=M;
+}
+
+function pointerProfile(e){
+  const M=profileMapper();
+  const {cv,X,Y,invX,invV}=M;
+  const fR=curveFn(board.rocker);
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const sx=M.X(1)-M.X(0), sy=M.Y(1)-M.Y(0);
+
+  if(e.type==='pointerdown'){
+    // Check handles of current selection first
+    if(profileCurve==='bottom'){
+      const p=board.rocker[sel.rocker];
+      if(p) for(const k of ['hl','hr']){
+        const dx=k==='hl'?p.hlx:p.hrx, dv=k==='hl'?p.hlv:p.hrv;
+        if(Math.hypot(X(p.x+dx)-mx, Y(p.v+dv)-my)<10){drag={name:'profile',curve:'bottom',i:sel.rocker,h:k};return;}
+      }
+    } else {
+      const p=board.thick[sel.thick];
+      if(p) for(const k of ['hl','hr']){
+        const dx=k==='hl'?p.hlx:p.hrx, dv=k==='hl'?p.hlv:p.hrv;
+        if(Math.hypot(X(p.x+dx)-mx, Y(fR(p.x+dx)+p.v+dv)-my)<10){drag={name:'profile',curve:'deck',i:sel.thick,h:k};return;}
+      }
+    }
+    // Hit-test all nodes across both curves
+    let best={curve:null,i:-1,d:1e9};
+    board.rocker.forEach((p,i)=>{const d=Math.hypot(X(p.x)-mx,Y(p.v)-my); if(d<best.d)best={curve:'bottom',i,d};});
+    board.thick.forEach((p,i)=>{const d=Math.hypot(X(p.x)-mx,Y(fR(p.x)+p.v)-my); if(d<best.d)best={curve:'deck',i,d};});
+    if(best.d<16){
+      profileCurve=best.curve;
+      if(best.curve==='bottom') sel.rocker=best.i; else sel.thick=best.i;
+      drag={name:'profile',curve:best.curve,i:best.i,h:null};
+      document.querySelectorAll('#profile-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.profile===profileCurve));
+      syncProfileBar(); syncHandleUI(); drawProfile();
+    }
+  } else if(e.type==='pointermove'&&drag&&drag.name==='profile'){
+    const fRc=curveFn(board.rocker);
+    if(drag.curve==='bottom'){
+      const data=board.rocker, p=data[drag.i];
+      if(drag.h){
+        let dx=invX(mx)-p.x, dv=invV(my)-p.v;
+        [dx,dv]=lockDelta(dx,dv);
+        if(drag.h==='hr'){dx=Math.max(0,dx);if(drag.i<data.length-1)dx=Math.min(dx,data[drag.i+1].x-p.x);}
+        else{dx=Math.min(0,dx);if(drag.i>0)dx=Math.max(dx,data[drag.i-1].x-p.x);}
+        p[drag.h+'x']=dx; p[drag.h+'v']=dv;
+        if(p.smooth) enforceSmooth(p,drag.h,sx,sy);
+      } else {
+        const isEnd=(drag.i===0||drag.i===data.length-1);
+        if(!isEnd) p.x=clamp(invX(mx),0,len());
+        p.v=clamp(invV(my),EDS.rocker.min,EDS.rocker.vmax);
+        keepSorted(data,drag.i);
+      }
+    } else {
+      const data=board.thick, p=data[drag.i];
+      if(drag.h){
+        const hx=p.x+(drag.h==='hl'?p.hlx:p.hrx);
+        let dx=invX(mx)-p.x, dv=invV(my)-(fRc(hx)+p.v);
+        [dx,dv]=lockDelta(dx,dv);
+        if(drag.h==='hr'){dx=Math.max(0,dx);if(drag.i<data.length-1)dx=Math.min(dx,data[drag.i+1].x-p.x);}
+        else{dx=Math.min(0,dx);if(drag.i>0)dx=Math.max(dx,data[drag.i-1].x-p.x);}
+        p[drag.h+'x']=dx; p[drag.h+'v']=dv;
+        if(p.smooth) enforceSmooth(p,drag.h,sx,sy);
+      } else {
+        const isEnd=(drag.i===0||drag.i===data.length-1);
+        if(!isEnd) p.x=clamp(invX(mx),0,len());
+        p.v=clamp(invV(my)-fRc(p.x), EDS.thick.min, EDS.thick.vmax);
+        keepSorted(data,drag.i);
+      }
+    }
+    rebuild(); drawProfile(); syncProfileBar();
+  } else if(e.type==='pointerup'){drag=null;}
+}
+
+function syncProfileBar(){
+  const xi=document.getElementById('rb-x'), vi=document.getElementById('rb-v'), lbl=document.getElementById('rb-v-label');
+  if(profileCurve==='bottom'){
+    const p=board.rocker[sel.rocker]; if(!p)return;
+    xi.value=p.x.toFixed(0); vi.value=p.v.toFixed(1); lbl.textContent='Z';
+    xi.disabled=(sel.rocker===0||sel.rocker===board.rocker.length-1);
+  } else {
+    const p=board.thick[sel.thick]; if(!p)return;
+    const fR=curveFn(board.rocker);
+    xi.value=p.x.toFixed(0); vi.value=(fR(p.x)+p.v).toFixed(1); lbl.textContent='H';
+    xi.disabled=(sel.thick===0||sel.thick===board.thick.length-1);
+  }
+}
+
+// Profile nodebar input handlers
+document.getElementById('rb-x').onchange=ev=>{
+  const val=parseFloat(ev.target.value); if(isNaN(val))return;
+  if(profileCurve==='bottom'){
+    const p=board.rocker[sel.rocker]; if(!p)return;
+    p.x=val; keepSorted(board.rocker,sel.rocker);
+  } else {
+    const p=board.thick[sel.thick]; if(!p)return;
+    p.x=val; keepSorted(board.thick,sel.thick);
+  }
+  rebuild(); drawProfile(); syncProfileBar();
+};
+document.getElementById('rb-v').onchange=ev=>{
+  const val=parseFloat(ev.target.value); if(isNaN(val))return;
+  if(profileCurve==='bottom'){
+    const p=board.rocker[sel.rocker]; if(!p)return;
+    p.v=clamp(val,EDS.rocker.min,EDS.rocker.vmax);
+  } else {
+    const p=board.thick[sel.thick]; if(!p)return;
+    const fR=curveFn(board.rocker);
+    p.v=clamp(val-fR(p.x), EDS.thick.min, EDS.thick.vmax);
+  }
+  rebuild(); drawProfile(); syncProfileBar();
+};
+
+// Profile curve toggle tabs
+document.querySelectorAll('#profile-tabs button').forEach(b=>b.onclick=()=>{
+  profileCurve=b.dataset.profile;
+  document.querySelectorAll('#profile-tabs button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  syncProfileBar(); syncHandleUI(); drawProfile();
+});
+
+// Profile add/del point buttons
+document.getElementById('profile-add').onclick=()=>{
+  const name=profileCurve==='bottom'?'rocker':'thick';
+  const d=EDS[name].data(), i=Math.max(1,Math.min(sel[name]+1,d.length-1));
+  const nx=(d[i-1].x+d[i].x)/2, nv=curveFn(d)(nx);
+  d.splice(i,0,autoHandles([{x:nx,v:nv}])[0]);
+  sel[name]=i; rebuild(); drawProfile(); syncProfileBar();
+};
+document.getElementById('profile-del').onclick=()=>{
+  const name=profileCurve==='bottom'?'rocker':'thick';
+  const d=EDS[name].data(), s=sel[name];
+  if(s>0&&s<d.length-1&&d.length>3){d.splice(s,1);sel[name]=Math.max(1,s-1);rebuild();drawProfile();syncProfileBar();}
+};
+
+/* ============================================================
+   BOARD LENGTH INPUT
+   ============================================================ */
+document.getElementById('board-length').onchange=e=>{
+  const v=parseFloat(e.target.value); if(isNaN(v))return;
+  const L=clamp(v,300,4000);
+  board.outline[board.outline.length-1].x=L;
+  // Clamp interior outline points
+  for(let i=1;i<board.outline.length-1;i++)
+    board.outline[i].x=clamp(board.outline[i].x,board.outline[i-1].x+5,L-5*(board.outline.length-1-i));
+  // Clamp interior rocker/thick points and sync endpoints
+  [board.rocker,board.thick].forEach(d=>{
+    for(let i=1;i<d.length-1;i++) d[i].x=clamp(d[i].x,5,L-5);
+  });
+  board.sections.forEach(s=>{s.x=clamp(s.x,10,L-10);});
+  invalidateSections(); rebuild(); redrawActive();
+  document.getElementById('board-length').value=L.toFixed(0);
+};
+
+/* ============================================================
+   SECTION EDITOR
    ============================================================ */
 let secSel={curve:'deck',i:1};
 function secMapper(){
   const cv=document.getElementById('cv-sect'),w=cv.clientWidth,h=cv.clientHeight,pad={l:16,r:16,t:18,b:24};
   const s=board.sections[activeSection];
   const halfW=curveFn(board.outline)(s.x)/2, t=curveFn(board.thick)(s.x);
-  const X=u=>pad.l+u*(w-pad.l-pad.r);                       // u 0..1 left→right (stringer→rail)
-  const span=h-pad.t-pad.b, zTop=1.15, zBot=-0.35;          // frac of thickness shown
+  const X=u=>pad.l+u*(w-pad.l-pad.r);
+  const span=h-pad.t-pad.b, zTop=1.15, zBot=-0.35;
   const Y=zf=>pad.t+(zTop-zf)/(zTop-zBot)*span;
   const invU=px=>clamp((px-pad.l)/(w-pad.l-pad.r),0,1);
   const invZ=py=>zTop-(py-pad.t)/span*(zTop-zBot);
@@ -512,16 +771,13 @@ function drawSection(){
   const M=secMapper();const {cv,w,h,X,Y,s,halfW,t}=M;
   const dpr=Math.min(devicePixelRatio,2);cv.width=w*dpr;cv.height=h*dpr;
   const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
-  // datums: stringer (u=0) and rocker baseline (z=0)
   g.strokeStyle='#3a5260';g.setLineDash([4,3]);
   g.beginPath();g.moveTo(X(0),M.pad.t);g.lineTo(X(0),h-M.pad.b);g.stroke();
   g.beginPath();g.moveTo(X(0),Y(0));g.lineTo(X(1),Y(0));g.stroke();g.setLineDash([]);
   g.fillStyle='#5e7079';g.font='9px monospace';
   g.fillText('⌀ stringer',X(0)+4,M.pad.t+8);g.fillText('baseline',X(1)-46,Y(0)-4);g.fillText('rail',X(1)-22,M.pad.t+8);
-  // both curves (and mirror to show full section faintly)
   drawSecCurve(g,M,s.deck,'#34d3c0','deck');
   drawSecCurve(g,M,s.bot,'#7fd4ff','bot');
-  // mirror outlines (left half) faint
   g.globalAlpha=0.28;
   mirrorCurve(g,M,s.deck,'#34d3c0');mirrorCurve(g,M,s.bot,'#7fd4ff');g.globalAlpha=1;
   g.fillStyle='#7d909b';g.font='10px monospace';
@@ -545,19 +801,16 @@ function drawSecCurve(g,M,nodes,col,which){
 }
 function mirrorCurve(g,M,nodes,col){
   const poly=samplePoly(nodes,28);g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();
-  poly.forEach((p,i)=>{const px=M.X(-p.x)+(M.X(0)-M.pad.l)*0; // mirror about stringer
-    const mx=2*M.X(0)-M.X(p.x),py=M.Y(p.v);i?g.lineTo(mx,py):g.moveTo(mx,py);});g.stroke();
+  poly.forEach((p,i)=>{const mx=2*M.X(0)-M.X(p.x),py=M.Y(p.v);i?g.lineTo(mx,py):g.moveTo(mx,py);});g.stroke();
 }
 function secPointer(e){
   const M=secMapper();const {cv,X,Y,invU,invZ}=M;
   const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   const curves={deck:M.s.deck,bot:M.s.bot};
   if(e.type==='pointerdown'){
-    // handle of current selection first
     const cur=curves[secSel.curve],p=cur&&cur[secSel.i];
     if(p){for(const k of ['hl','hr']){const hx=X(p.x+(k==='hl'?p.hlx:p.hrx)),hy=Y(p.v+(k==='hl'?p.hlv:p.hrv));
       if(Math.hypot(hx-mx,hy-my)<10){drag={sec:true,curve:secSel.curve,i:secSel.i,h:k};return;}}}
-    // nearest node across both curves
     let bc=null,bi=-1,bd=1e9;
     for(const c of ['deck','bot'])curves[c].forEach((p,i)=>{const d=Math.hypot(X(p.x)-mx,Y(p.v)-my);if(d<bd){bd=d;bc=c;bi=i;}});
     if(bd<16){secSel={curve:bc,i:bi};drag={sec:true,curve:bc,i:bi,h:null};syncHandleUI();drawSection();}
@@ -571,7 +824,6 @@ function secPointer(e){
       if(p.smooth){const sx=M.X(1)-M.X(0),sy=M.Y(1)-M.Y(0);enforceSmooth(p,drag.h,sx,sy);}
     } else {
       const isEnd=(drag.i===0||drag.i===arr.length-1);
-      // u=0 (stringer) and u=1 (rail) stay locked in u; deck[0]/bot[0] z locked
       if(!isEnd)p.x=clamp(invU(mx),0.02,0.98);
       if(!(drag.curve==='deck'&&drag.i===0)&&!(drag.curve==='bot'&&drag.i===0))
         p.v=clamp(invZ(my),-0.4,1.2);
@@ -590,7 +842,7 @@ function syncSec(){document.getElementById('sec-x').value=board.sections[activeS
 document.getElementById('sec-x').onchange=e=>{const v=parseFloat(e.target.value);
   if(!isNaN(v)){board.sections[activeSection].x=clamp(v,0,len());invalidateSections();rebuild();syncSec();}};
 document.getElementById('sec-add').onclick=()=>{
-  const ss=[...board.sections].sort((a,b)=>a.x-b.x);const nx=clamp(len()*0.5,0,len());
+  const nx=clamp(len()*0.5,0,len());
   const base=board.sections[activeSection];
   board.sections.push(mkSection(nx,
     base.deck.map(p=>[p.x,p.v]),base.bot.map(p=>[p.x,p.v])));
@@ -608,15 +860,25 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   requestAnimationFrame(redrawActive);
 });
 function redrawActive(){
-  ['outline','rocker','thick'].forEach(n=>{
-    if(document.getElementById('ed-'+n).classList.contains('on')){drawEditor(n);syncBar(n);}});
+  if(document.getElementById('ed-outline').classList.contains('on')){drawEditor('outline');syncOutlineBar();}
+  if(document.getElementById('ed-rocker').classList.contains('on')){drawProfile();syncProfileBar();}
   if(document.getElementById('ed-sect').classList.contains('on'))drawSection();
   syncHandleUI();
 }
-['outline','rocker','thick'].forEach(name=>{const cv=document.getElementById(EDS[name].cv);
-  cv.addEventListener('pointerdown',e=>pointer(name,e));
-  cv.addEventListener('pointermove',e=>pointer(name,e));
-  addEventListener('pointerup',e=>pointer(name,e));});
+
+// Outline pointer events
+const ocv=document.getElementById('cv-outline');
+ocv.addEventListener('pointerdown',e=>pointer('outline',e));
+ocv.addEventListener('pointermove',e=>pointer('outline',e));
+addEventListener('pointerup',e=>pointer('outline',e));
+
+// Profile pointer events
+const prcv=document.getElementById('cv-rocker');
+prcv.addEventListener('pointerdown',pointerProfile);
+prcv.addEventListener('pointermove',pointerProfile);
+addEventListener('pointerup',pointerProfile);
+
+// Section pointer events
 const sc=document.getElementById('cv-sect');
 sc.addEventListener('pointerdown',secPointer);sc.addEventListener('pointermove',secPointer);
 addEventListener('pointerup',secPointer);
@@ -626,15 +888,19 @@ document.getElementById('cb-parallel').onchange=e=>{
   n.smooth=e.target.checked;
   if(n.smooth){const [sx,sy]=currentScales(); enforceSmooth(n,'hr',sx,sy);}
   invalidateSections(); rebuild();
-  const t=activeTab(); if(t==='sect')drawSection(); else drawEditor(t);
+  const t=activeTab();
+  if(t==='sect')drawSection();
+  else if(t==='rocker')drawProfile();
+  else drawEditor(t);
 };
 document.getElementById('btn-lock').onclick=()=>{
-  handleLock = handleLock==='free'?'vert':handleLock==='vert'?'horiz':'free';
-  document.getElementById('lock-lbl').textContent =
+  handleLock=handleLock==='free'?'vert':handleLock==='vert'?'horiz':'free';
+  document.getElementById('lock-lbl').textContent=
     handleLock==='free'?'Free':handleLock==='vert'?'Vertical':'Horizontal';
 };
 
 initGL();
 buildStationTabs();
-requestAnimationFrame(()=>{drawEditor('outline');syncBar('outline');syncHandleUI();});
+document.getElementById('board-length').value=len().toFixed(0);
+requestAnimationFrame(()=>{drawEditor('outline');syncOutlineBar();syncHandleUI();});
 </script>
