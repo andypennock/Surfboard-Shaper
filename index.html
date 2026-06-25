@@ -1,0 +1,640 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shaper — Parametric Board v0.2</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --bg:#0e1418; --panel:#141c22; --panel2:#0b1115; --line:#22303a;
+    --ink:#cdd9df; --dim:#7d909b; --geo:#34d3c0; --active:#ffb454;
+    --datum:#3a5260; --grid:#18242b; --handle:#7fd4ff;
+    --mono:'SFMono-Regular',ui-monospace,'Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,'Segoe UI',Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+    display:grid;grid-template-columns:396px 1fr;grid-template-rows:1fr auto;
+    grid-template-areas:"panel view" "panel dims";height:100vh;overflow:hidden}
+  #panel{grid-area:panel;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0}
+  .hd{padding:13px 16px 9px;border-bottom:1px solid var(--line)}
+  .hd h1{margin:0;font-size:13px;letter-spacing:.18em;text-transform:uppercase;font-weight:600}
+  .hd .sub{margin-top:3px;font-size:11px;color:var(--dim);font-family:var(--mono)}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;
+    color:var(--dim);padding:9px 4px;font-size:11px;letter-spacing:.04em;cursor:pointer;
+    text-transform:uppercase;font-family:var(--sans)}
+  .tabs button.on{color:var(--ink);border-bottom-color:var(--geo)}
+  .tabs button:hover{color:var(--ink)}
+  .body{flex:1;overflow-y:auto;padding:14px 16px}
+  .editor{display:none}
+  .editor.on{display:block}
+  .editor canvas{width:100%;height:230px;display:block;background:var(--panel2);
+    border:1px solid var(--line);border-radius:3px;touch-action:none;cursor:crosshair}
+  #cv-sect{height:240px}
+  .ehint{font-size:10.5px;color:var(--dim);margin:8px 0 4px;line-height:1.55}
+  .ehint b{color:var(--ink);font-weight:600}
+  .nodebar{display:flex;align-items:center;gap:8px;margin-top:10px;font-family:var(--mono);font-size:11px}
+  .nodebar .tag{color:var(--dim)}
+  .nodebar input{width:74px;background:var(--panel2);border:1px solid var(--line);color:var(--active);
+    font-family:var(--mono);font-size:11px;padding:4px 6px;border-radius:2px;text-align:right}
+  .nodebar input:disabled{color:var(--dim)}
+  .ctlrow{display:flex;gap:8px;margin-top:12px}
+  .ctlrow button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:7px;font-size:11px;border-radius:3px;cursor:pointer}
+  .ctlrow button:hover{border-color:var(--geo);color:var(--geo)}
+  .handlebar{display:flex;align-items:center;gap:16px;padding:8px 16px;border-bottom:1px solid var(--line);
+    font-size:11px;color:var(--dim);background:var(--panel2)}
+  .handlebar label{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+  .handlebar input[type=checkbox]{accent-color:var(--geo);width:14px;height:14px}
+  .handlebar button{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+    font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:3px;cursor:pointer}
+  .handlebar button:hover{border-color:var(--geo)}
+  .handlebar .lk{color:var(--active)}
+  .stationtabs{display:flex;gap:6px;margin-bottom:8px}
+  .stationtabs button{flex:1;background:var(--panel2);border:1px solid var(--line);
+    color:var(--dim);padding:6px;font-size:11px;border-radius:3px;cursor:pointer;font-family:var(--mono)}
+  .stationtabs button.on{color:var(--active);border-color:var(--active)}
+  .fld{display:flex;justify-content:space-between;align-items:center;margin:9px 0;font-size:12px}
+  .fld input{width:96px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    font-family:var(--mono);font-size:12px;padding:4px 6px;border-radius:2px;text-align:right}
+  #view{grid-area:view;position:relative;min-width:0}
+  #gl{display:block;width:100%;height:100%}
+  #viewbadge{position:absolute;top:12px;left:14px;font-family:var(--mono);font-size:11px;
+    color:var(--dim);pointer-events:none;line-height:1.6}
+  #viewbadge .ax{color:var(--geo)}
+  .vbtns{position:absolute;top:12px;right:14px;display:flex;gap:6px}
+  .vbtns button{background:#0b1115cc;border:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:10.5px;padding:5px 8px;border-radius:3px;cursor:pointer}
+  .vbtns button:hover{color:var(--ink);border-color:var(--geo)}
+  #dims{grid-area:dims;background:var(--panel2);border-top:1px solid var(--line);display:flex;flex-wrap:wrap}
+  .dim{flex:1 1 0;min-width:118px;padding:10px 14px;border-right:1px solid var(--line)}
+  .dim .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .dim .v{font-family:var(--mono);font-size:18px;margin-top:2px;color:var(--ink)}
+  .dim .v small{font-size:11px;color:var(--dim);margin-left:3px}
+  .dim.vol .v{color:var(--geo)}
+  @media(max-width:760px){
+    body{grid-template-columns:1fr;grid-template-rows:auto 240px auto;
+      grid-template-areas:"panel" "view" "dims"}
+    #panel{border-right:0;border-bottom:1px solid var(--line)}
+  }
+</style>
+
+<div id="panel">
+  <div class="hd"><h1>Shaper</h1>
+    <div class="sub">datum · tail X0 · stringer Y0 · baseline Z0</div></div>
+  <div class="tabs">
+    <button data-tab="outline" class="on">Outline</button>
+    <button data-tab="rocker">Rocker</button>
+    <button data-tab="thick">Foil</button>
+    <button data-tab="sect">Sections</button>
+  </div>
+  <div class="handlebar">
+    <label title="Keep the selected point's two handles collinear (smooth point)">
+      <input type="checkbox" id="cb-parallel"> Parallel handles</label>
+    <button id="btn-lock" title="Constrain handle dragging to screen axes">Drag: <span class="lk" id="lock-lbl">Free</span></button>
+  </div>
+  <div class="body">
+    <div class="editor on" id="ed-outline">
+      <canvas id="cv-outline"></canvas>
+      <div class="ehint">Plan view from above. Drag a <b>point</b> to move it; drag a <b>handle</b> to shape the curve through it. <b>X</b> from tail, <b>W</b> full width.</div>
+      <div class="nodebar"><span class="tag">pt</span>
+        <span class="tag">X</span><input id="ob-x" disabled>
+        <span class="tag">W</span><input id="ob-v"></div>
+      <div class="ctlrow"><button data-add="outline">+ point</button><button data-del="outline">− point</button></div>
+    </div>
+    <div class="editor" id="ed-rocker">
+      <canvas id="cv-rocker"></canvas>
+      <div class="ehint">Side profile (bottom of board). <b>Z</b> = height above the lowest point (baseline). Drag points and handles for nose/tail lift and flow.</div>
+      <div class="nodebar"><span class="tag">pt</span>
+        <span class="tag">X</span><input id="rb-x">
+        <span class="tag">Z</span><input id="rb-v"></div>
+      <div class="ctlrow"><button data-add="rocker">+ point</button><button data-del="rocker">− point</button></div>
+    </div>
+    <div class="editor" id="ed-thick">
+      <canvas id="cv-thick"></canvas>
+      <div class="ehint">Centreline thickness — the foil. Drag points and handles to set where the volume sits along the length.</div>
+      <div class="nodebar"><span class="tag">pt</span>
+        <span class="tag">X</span><input id="tb-x">
+        <span class="tag">T</span><input id="tb-v"></div>
+      <div class="ctlrow"><button data-add="thick">+ point</button><button data-del="thick">− point</button></div>
+    </div>
+    <div class="editor" id="ed-sect">
+      <div class="stationtabs" id="station-tabs"></div>
+      <canvas id="cv-sect"></canvas>
+      <div class="ehint">Cross-section at this station, stringer (centre) → rail. <b>Teal = deck, blue = bottom.</b> Drag points/handles; the loft blends between stations.</div>
+      <div class="fld"><span>Station X (from tail)</span><input id="sec-x" type="number"></div>
+      <div class="ctlrow"><button id="sec-add">+ station</button><button id="sec-del">− station</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="view">
+  <canvas id="gl"></canvas>
+  <div id="viewbadge"><span class="ax">X</span> length&nbsp; <span class="ax">Y</span> width&nbsp;
+    <span class="ax">Z</span> height<br>drag orbit · scroll zoom</div>
+  <div class="vbtns">
+    <button data-cam="iso">iso</button><button data-cam="top">top</button>
+    <button data-cam="side">side</button><button data-cam="end">end</button>
+  </div>
+</div>
+
+<div id="dims">
+  <div class="dim"><div class="k">Length</div><div class="v" id="d-len">—</div></div>
+  <div class="dim"><div class="k">Max width</div><div class="v" id="d-wid">—</div></div>
+  <div class="dim"><div class="k">Max thickness</div><div class="v" id="d-thk">—</div></div>
+  <div class="dim"><div class="k">Nose rocker</div><div class="v" id="d-nr">—</div></div>
+  <div class="dim"><div class="k">Tail rocker</div><div class="v" id="d-tr">—</div></div>
+  <div class="dim vol"><div class="k">Volume</div><div class="v" id="d-vol">—</div></div>
+</div>
+
+<script>
+/* ============================================================
+   CURVE ENGINE — cubic Bézier, nodes carry tangent handles
+   node = {x, v, hlx,hlv, hrx,hrv}   handles are offsets from the node
+   ============================================================ */
+function autoHandles(pts){
+  return pts.map((p,i)=>{
+    const a=pts[i-1]||p, b=pts[i+1]||p;
+    const dx=(b.x-a.x)/6, dv=(b.v-a.v)/6;
+    return {x:p.x,v:p.v, hlx:-dx,hlv:-dv, hrx:dx,hrv:dv};
+  });
+}
+function bz(a,b,c,d,t){const u=1-t;return u*u*u*a+3*u*u*t*b+3*u*t*t*c+t*t*t*d;}
+function curveFn(nodes){
+  const n=nodes;
+  return function(x){
+    if(x<=n[0].x) return n[0].v;
+    if(x>=n[n.length-1].x) return n[n.length-1].v;
+    let i=0; while(i<n.length-1 && n[i+1].x<x) i++;
+    const A=n[i],B=n[i+1];
+    const p0x=A.x,p0v=A.v;
+    let p1x=A.x+A.hrx, p1v=A.v+A.hrv;
+    let p2x=B.x+B.hlx, p2v=B.v+B.hlv;
+    const p3x=B.x,p3v=B.v;
+    p1x=Math.min(Math.max(p1x,p0x),p3x);   // keep x monotonic
+    p2x=Math.min(Math.max(p2x,p0x),p3x);
+    let lo=0,hi=1;
+    for(let k=0;k<32;k++){const t=(lo+hi)/2; if(bz(p0x,p1x,p2x,p3x,t)<x)lo=t;else hi=t;}
+    return bz(p0v,p1v,p2v,p3v,(lo+hi)/2);
+  };
+}
+function samplePoly(nodes,perSeg){ // [{x,v}] for drawing
+  const out=[];
+  for(let i=0;i<nodes.length-1;i++){
+    const A=nodes[i],B=nodes[i+1];
+    const p0x=A.x,p0v=A.v,p1x=A.x+A.hrx,p1v=A.v+A.hrv,
+          p2x=B.x+B.hlx,p2v=B.v+B.hlv,p3x=B.x,p3v=B.v;
+    for(let k=(i?1:0);k<=perSeg;k++){const t=k/perSeg;
+      out.push({x:bz(p0x,p1x,p2x,p3x,t),v:bz(p0v,p1v,p2v,p3v,t)});}
+  }
+  return out;
+}
+
+/* ============================================================
+   MODEL  (mm, datum tail/stringer/baseline)
+   ============================================================ */
+const board = {
+  outline: autoHandles([{x:0,v:150},{x:300,v:300},{x:950,v:485},{x:1550,v:360},{x:1880,v:110}]),
+  rocker:  autoHandles([{x:0,v:42},{x:350,v:8},{x:850,v:0},{x:1350,v:22},{x:1880,v:132}]),
+  thick:   autoHandles([{x:0,v:14},{x:300,v:54},{x:980,v:73},{x:1520,v:52},{x:1880,v:11}]),
+  // sections: each station has editable deck & bottom normalised curves
+  // x in 0..1 = fraction of half-width (stringer→rail); v = fraction of thickness
+  sections: [
+    mkSection(120, [[0,1],[0.6,0.78],[1,0.42]], [[0,0],[0.5,-0.04],[1,0.42]]), // tail: vee
+    mkSection(980, [[0,1],[0.6,0.82],[1,0.5]],  [[0,0],[0.5,0.06],[1,0.5]]),   // mid: concave, round rail
+    mkSection(1760,[[0,1],[0.6,0.9],[1,0.6]],   [[0,0],[0.5,0.0],[1,0.6]]),    // nose: full deck
+  ],
+};
+function mkSection(x,deckPts,botPts){
+  return { x,
+    deck: autoHandles(deckPts.map(p=>({x:p[0],v:p[1]}))),
+    bot:  autoHandles(botPts.map(p=>({x:p[0],v:p[1]}))) };
+}
+let activeSection=1;
+const len=()=>board.outline[board.outline.length-1].x;
+
+/* section profile sampled to a u-grid, smoothly interpolated along length */
+const UG=24;
+function sampleSection(s){
+  const fd=curveFn(s.deck), fb=curveFn(s.bot), d=[],b=[];
+  for(let k=0;k<=UG;k++){const u=k/UG; d.push(fd(u)); b.push(fb(u));}
+  return {d,b};
+}
+let _S=null;                       // cache of sampled stations (only depends on sections)
+function invalidateSections(){ _S=null; }
+function getS(){ if(!_S) _S=[...board.sections].sort((a,b)=>a.x-b.x).map(s=>({x:s.x,...sampleSection(s)})); return _S; }
+function cr(p0,p1,p2,p3,t){const t2=t*t,t3=t2*t;
+  return 0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t2+(-p0+3*p1-3*p2+p3)*t3);}
+function profileAt(x){
+  const S=getS();
+  if(S.length===1||x<=S[0].x) return S[0];
+  if(x>=S[S.length-1].x) return S[S.length-1];
+  let i=0; while(i<S.length-1 && S[i+1].x<x) i++;
+  const A=S[i],B=S[i+1],t=(x-A.x)/(B.x-A.x);
+  const P0=S[i-1]||A, P3=S[i+2]||B, d=[],b=[];
+  for(let k=0;k<=UG;k++){
+    d.push(cr(P0.d[k],A.d[k],B.d[k],P3.d[k],t));
+    b.push(cr(P0.b[k],A.b[k],B.b[k],P3.b[k],t));
+  }
+  return {d,b};
+}
+function computeVolume(fW,fR,fT){
+  const L=len(),NX=150; let vol=0;
+  for(let i=0;i<NX;i++){
+    const x=(i+0.5)/NX*L,dx=L/NX,halfW=fW(x)/2,t=fT(x),pr=profileAt(x);
+    let area=0;
+    for(let k=0;k<UG;k++){
+      const h0=(pr.d[k]-pr.b[k])*t, h1=(pr.d[k+1]-pr.b[k+1])*t;
+      area+=0.5*(h0+h1)*(halfW/UG);
+    }
+    vol+=2*area*dx;
+  }
+  return vol/1e6;
+}
+
+/* ============================================================
+   3D
+   ============================================================ */
+let renderer,scene,camera,boardMesh,wire;
+let camAng={az:-0.9,el:0.5,r:2600}, camTarget;
+function initGL(){
+  const cv=document.getElementById('gl');
+  renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  scene=new THREE.Scene(); scene.background=new THREE.Color(0x0e1418);
+  camera=new THREE.PerspectiveCamera(40,1,1,20000);
+  scene.add(new THREE.AmbientLight(0xffffff,0.55));
+  const d1=new THREE.DirectionalLight(0xffffff,0.9);d1.position.set(1,2,1.3);scene.add(d1);
+  const d2=new THREE.DirectionalLight(0x88bbff,0.4);d2.position.set(-1.5,-0.5,-1);scene.add(d2);
+  const grid=new THREE.GridHelper(3000,30,0x22303a,0x18242b);grid.position.set(900,0,0);scene.add(grid);
+  addAxis([0,0,0],[180,0,0],0x34d3c0); addAxis([0,0,0],[0,0,140],0x40606e); addAxis([0,0,0],[0,55,0],0x40606e);
+  camTarget=new THREE.Vector3(len()/2,30,0);
+  rebuild(); resize();
+  cv.addEventListener('pointerdown',orbStart);
+  cv.addEventListener('wheel',e=>{e.preventDefault();camAng.r*=(1+Math.sign(e.deltaY)*0.08);applyCam();},{passive:false});
+  loop();
+}
+function addAxis(a,b,c){const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a),new THREE.Vector3(...b)]);
+  scene.add(new THREE.Line(g,new THREE.LineBasicMaterial({color:c})));}
+function rebuild(){
+  const fW=curveFn(board.outline),fR=curveFn(board.rocker),fT=curveFn(board.thick);
+  const L=len(),NX=90;
+  const rings=[];
+  for(let i=0;i<=NX;i++){
+    const x=i/NX*L,halfW=fW(x)/2,t=fT(x),b=fR(x),pr=profileAt(x);
+    const loop=[];
+    for(let k=0;k<=UG;k++)loop.push([x,b+t*pr.b[k], halfW*k/UG]);    // R bottom
+    for(let k=UG;k>=0;k--)loop.push([x,b+t*pr.d[k], halfW*k/UG]);    // R deck
+    for(let k=0;k<=UG;k++)loop.push([x,b+t*pr.d[k],-halfW*k/UG]);    // L deck
+    for(let k=UG;k>=0;k--)loop.push([x,b+t*pr.b[k],-halfW*k/UG]);    // L bottom
+    rings.push(loop);
+  }
+  const P=rings[0].length, verts=[], idx=[];
+  for(let i=0;i<=NX;i++)for(let j=0;j<P;j++)verts.push(...rings[i][j]);
+  for(let i=0;i<NX;i++)for(let j=0;j<P;j++){const j2=(j+1)%P;
+    const a=i*P+j,b=(i+1)*P+j,c=i*P+j2,d=(i+1)*P+j2;
+    idx.push(a,b,c, c,b,d);}
+  for(const [ri,flip] of [[0,false],[NX,true]]){           // smooth end caps
+    const ring=rings[ri],ci=verts.length/3;
+    verts.push(avg(ring,0),avg(ring,1),avg(ring,2));
+    for(let j=0;j<P;j++){const j2=(j+1)%P,a=ri*P+j,b=ri*P+j2;
+      if(flip)idx.push(ci,a,b);else idx.push(ci,b,a);}
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  if(boardMesh){scene.remove(boardMesh);boardMesh.geometry.dispose();}
+  if(wire){scene.remove(wire);wire.geometry.dispose();}
+  boardMesh=new THREE.Mesh(geo,new THREE.MeshStandardMaterial(
+    {color:0x2a8f86,metalness:0.1,roughness:0.5,side:THREE.DoubleSide}));
+  scene.add(boardMesh);
+  const og=[];
+  for(let i=0;i<=NX;i++){const x=i/NX*L;og.push(new THREE.Vector3(x,fR(x),fW(x)/2));}
+  for(let i=NX;i>=0;i--){const x=i/NX*L;og.push(new THREE.Vector3(x,fR(x),-fW(x)/2));}
+  wire=new THREE.Line(new THREE.BufferGeometry().setFromPoints(og),
+    new THREE.LineBasicMaterial({color:0x34d3c0,transparent:true,opacity:0.3}));
+  scene.add(wire);
+  updateDims(fW,fR,fT);
+}
+const avg=(r,k)=>r.reduce((s,p)=>s+p[k],0)/r.length;
+function applyCam(){
+  camAng.r=Math.max(800,Math.min(8000,camAng.r));camAng.el=Math.max(-1.4,Math.min(1.4,camAng.el));
+  const {az,el,r}=camAng;
+  camera.position.set(camTarget.x+r*Math.cos(el)*Math.cos(az),camTarget.y+r*Math.sin(el),camTarget.z+r*Math.cos(el)*Math.sin(az));
+  camera.lookAt(camTarget);
+}
+function orbStart(e){const sx=e.clientX,sy=e.clientY,a0=camAng.az,e0=camAng.el;
+  const mv=ev=>{camAng.az=a0-(ev.clientX-sx)*0.008;camAng.el=e0+(ev.clientY-sy)*0.008;applyCam();};
+  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up);};
+  addEventListener('pointermove',mv);addEventListener('pointerup',up);}
+function resize(){const v=document.getElementById('view');
+  renderer.setSize(v.clientWidth,v.clientHeight,false);
+  camera.aspect=v.clientWidth/v.clientHeight;camera.updateProjectionMatrix();applyCam();}
+function loop(){renderer.render(scene,camera);requestAnimationFrame(loop);}
+addEventListener('resize',()=>{resize();redrawActive();});
+document.querySelectorAll('.vbtns button').forEach(b=>b.onclick=()=>{const m=b.dataset.cam;
+  if(m==='iso')camAng={az:-0.9,el:0.5,r:2600};if(m==='top')camAng={az:-Math.PI/2,el:1.39,r:2600};
+  if(m==='side')camAng={az:0,el:0.02,r:2600};if(m==='end')camAng={az:-Math.PI/2,el:0.02,r:1600};applyCam();});
+
+/* ============================================================
+   DIMENSIONS
+   ============================================================ */
+function updateDims(fW,fR,fT){
+  const L=len();
+  let mw=0,mwx=0;for(let x=0;x<=L;x+=5){if(fW(x)>mw){mw=fW(x);mwx=x;}}
+  let mt=0,mtx=0;for(let x=0;x<=L;x+=5){if(fT(x)>mt){mt=fT(x);mtx=x;}}
+  let lo=1e9;for(let x=0;x<=L;x+=5)lo=Math.min(lo,fR(x));
+  set('d-len',`${L.toFixed(0)}<small>mm · ${ftin(L)}</small>`);
+  set('d-wid',`${mw.toFixed(0)}<small>mm @ ${mwx.toFixed(0)}</small>`);
+  set('d-thk',`${mt.toFixed(1)}<small>mm @ ${mtx.toFixed(0)}</small>`);
+  set('d-nr',`${(fR(L)-lo).toFixed(0)}<small>mm</small>`);
+  set('d-tr',`${(fR(0)-lo).toFixed(0)}<small>mm</small>`);
+  set('d-vol',`${computeVolume(fW,fR,fT).toFixed(1)}<small>L</small>`);
+}
+const set=(id,h)=>document.getElementById(id).innerHTML=h;
+function ftin(mm){const inch=mm/25.4,ft=Math.floor(inch/12);return `${ft}'${(inch-ft*12).toFixed(1)}"`;}
+
+/* ============================================================
+   GENERIC 2D CURVE EDITOR (outline / rocker / thick)
+   ============================================================ */
+const EDS={
+  outline:{cv:'cv-outline',data:()=>board.outline,mirror:true, vmax:600, min:10, xb:'ob-x',vb:'ob-v',lockEndsX:true},
+  rocker: {cv:'cv-rocker', data:()=>board.rocker, mirror:false,vmax:200, min:0,  xb:'rb-x',vb:'rb-v',lockEndsX:false},
+  thick:  {cv:'cv-thick',  data:()=>board.thick,  mirror:false,vmax:300, min:1,  xb:'tb-x',vb:'tb-v',lockEndsX:false, silhouette:true},
+};
+let sel={outline:1,rocker:2,thick:2};
+let drag=null;
+let handleLock='free';   // 'free' | 'vert' | 'horiz' (screen axes)
+function lockDelta(dx,dv){return handleLock==='vert'?[0,dv]:handleLock==='horiz'?[dx,0]:[dx,dv];}
+function enforceSmooth(node,dragged,sx,sy){
+  // make the OTHER handle collinear & opposite in SCREEN space, preserving its screen length
+  const dX=dragged==='hr'?node.hrx:node.hlx, dV=dragged==='hr'?node.hrv:node.hlv, tgt=dragged==='hr'?'hl':'hr';
+  const dsx=dX*sx, dsy=dV*sy, dmag=Math.hypot(dsx,dsy)||1;
+  const ux=-dsx/dmag, uy=-dsy/dmag;
+  const tlen=Math.hypot(node[tgt+'x']*sx,node[tgt+'v']*sy)||dmag;
+  node[tgt+'x']=(ux*tlen)/sx; node[tgt+'v']=(uy*tlen)/sy;
+}
+function activeTab(){const b=document.querySelector('.tabs button.on');return b?b.dataset.tab:'outline';}
+function currentNode(){const t=activeTab();
+  if(t==='sect'){const s=board.sections[activeSection];return (secSel.curve==='deck'?s.deck:s.bot)[secSel.i];}
+  return EDS[t]?EDS[t].data()[sel[t]]:null;}
+function currentScales(){const t=activeTab();const M=(t==='sect')?secMapper():mapper(t);return [M.X(1)-M.X(0),M.Y(1)-M.Y(0)];}
+function syncHandleUI(){const n=currentNode(),cb=document.getElementById('cb-parallel');if(cb)cb.checked=!!(n&&n.smooth);}
+
+function mapper(name){
+  const E=EDS[name], cv=document.getElementById(E.cv);
+  const w=cv.clientWidth,h=cv.clientHeight, pad={l:44,r:16,t:16,b:26};
+  const L=Math.max(len(),100), VM=E.vmax;
+  const X=x=>pad.l+(x/L)*(w-pad.l-pad.r);
+  const base=E.mirror?(pad.t+(h-pad.t-pad.b)/2):(h-pad.b);
+  const Y=v=>E.mirror?base-(v/2/VM)*((h-pad.t-pad.b)/2):base-(v/VM)*(h-pad.t-pad.b);
+  const invX=px=>(px-pad.l)/(w-pad.l-pad.r)*L;
+  const invV=py=>E.mirror?Math.abs(base-py)/((h-pad.t-pad.b)/2)*VM*2:(base-py)/(h-pad.t-pad.b)*VM;
+  return {E,cv,w,h,pad,L,VM,X,Y,invX,invV,base};
+}
+function drawEditor(name){
+  const M=mapper(name); const {E,cv,w,h,X,Y,L,base}=M;
+  const dpr=Math.min(devicePixelRatio,2);
+  cv.width=w*dpr; cv.height=h*dpr;
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  g.font='9px monospace';
+  const ref=E.silhouette?curveFn(board.rocker):null;     // foil shown as deck = rocker + thickness
+  const vv=(x,v)=>ref?ref(x)+v:v;
+  // grid
+  g.strokeStyle='#18242b';g.fillStyle='#5e7079';
+  for(let gx=0;gx<=L+1;gx+=250){g.beginPath();g.moveTo(X(gx),M.pad.t);g.lineTo(X(gx),h-M.pad.b);g.stroke();g.fillText(gx,X(gx)-6,h-8);}
+  // datums
+  g.strokeStyle='#3a5260';g.setLineDash([4,3]);
+  g.beginPath();g.moveTo(X(0),M.pad.t);g.lineTo(X(0),h-M.pad.b);g.stroke();
+  g.beginPath();g.moveTo(M.pad.l,base);g.lineTo(w-M.pad.r,base);g.stroke();g.setLineDash([]);
+  g.fillText(name==='rocker'?'baseline':(E.mirror?'⌀ stringer':(E.silhouette?'baseline':'0')),4,base+3);
+  g.fillText('tail',X(0)+2,M.pad.t+8);
+  // bottom (rocker) reference line for the foil view
+  if(ref){g.strokeStyle='#46606e';g.lineWidth=1.5;g.beginPath();
+    for(let i=0;i<=120;i++){const x=i/120*L,px=X(x),py=Y(ref(x));i?g.lineTo(px,py):g.moveTo(px,py);}g.stroke();
+    g.fillStyle='#5e7079';g.fillText('bottom (rocker)',X(L*0.5),Y(ref(L*0.5))+12);}
+  // main curve (deck line, or value curve)
+  const data=E.data(), poly=samplePoly(data,40);
+  g.strokeStyle='#34d3c0';g.lineWidth=2;g.beginPath();
+  poly.forEach((p,i)=>{const px=X(p.x),py=Y(vv(p.x,p.v));i?g.lineTo(px,py):g.moveTo(px,py);});g.stroke();
+  if(E.mirror){g.beginPath();poly.forEach((p,i)=>{const px=X(p.x),py=base+(base-Y(p.v));i?g.lineTo(px,py):g.moveTo(px,py);});g.stroke();}
+  if(ref){g.fillStyle='#5e7079';g.fillText('deck',X(L*0.5),Y(vv(L*0.5,curveFn(data)(L*0.5)))-8);}
+  // nodes + handles of selected
+  const si=sel[name];
+  data.forEach((p,i)=>{
+    const px=X(p.x),py=Y(vv(p.x,p.v)),on=(si===i);
+    if(on){
+      [['hl',p.hlx,p.hlv],['hr',p.hrx,p.hrv]].forEach(([,dx,dv],k)=>{
+        if((i===0&&k===0)||(i===data.length-1&&k===1))return;
+        const hx=X(p.x+dx),hy=Y(vv(p.x+dx,p.v+dv));
+        g.strokeStyle='#7fd4ff';g.lineWidth=1;g.beginPath();g.moveTo(px,py);g.lineTo(hx,hy);g.stroke();
+        g.fillStyle='#7fd4ff';g.fillRect(hx-3,hy-3,6,6);
+      });
+    }
+    g.fillStyle=on?'#ffb454':'#cdd9df';g.beginPath();g.arc(px,py,on?5:4,0,7);g.fill();
+    if(p.smooth){g.strokeStyle=on?'#ffb454':'#7fd4ff';g.lineWidth=1;g.beginPath();g.arc(px,py,on?8:6.5,0,7);g.stroke();}
+  });
+  cv._M=M;
+}
+function pointer(name,e){
+  const M=mapper(name); const {cv,X,Y,invX,invV,L,VM}=M, E=EDS[name], data=E.data();
+  const ref=E.silhouette?curveFn(board.rocker):null;
+  const off=x=>ref?ref(x):0;                     // vertical reference (rocker) for the foil view
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  if(e.type==='pointerdown'){
+    const si=sel[name], p=data[si];
+    if(p){for(const k of ['hl','hr']){
+      const dv=(k==='hl'?p.hlv:p.hrv),dx=(k==='hl'?p.hlx:p.hrx);
+      const hx=X(p.x+dx),hy=Y(off(p.x+dx)+p.v+dv);
+      if(Math.hypot(hx-mx,hy-my)<10){drag={name,i:si,h:k};return;}
+    }}
+    let best=-1,bd=1e9;data.forEach((p,i)=>{const d=Math.hypot(X(p.x)-mx,Y(off(p.x)+p.v)-my);if(d<bd){bd=d;best=i;}});
+    if(bd<16){sel[name]=best;drag={name,i:best,h:null};syncBar(name);syncHandleUI();drawEditor(name);}
+  } else if(e.type==='pointermove'&&drag&&drag.name===name){
+    const p=data[drag.i];
+    if(drag.h){
+      let dx=invX(mx)-p.x, dv=invV(my)-(off(p.x)+p.v);
+      [dx,dv]=lockDelta(dx,dv);
+      if(drag.h==='hr'){dx=Math.max(0,dx); if(drag.i<data.length-1)dx=Math.min(dx,data[drag.i+1].x-p.x);}
+      else {dx=Math.min(0,dx); if(drag.i>0)dx=Math.max(dx,data[drag.i-1].x-p.x);}
+      if(drag.h==='hr'){p.hrx=dx;p.hrv=dv;} else {p.hlx=dx;p.hlv=dv;}
+      if(p.smooth){const sx=M.X(1)-M.X(0),sy=M.Y(1)-M.Y(0);enforceSmooth(p,drag.h,sx,sy);}
+    } else {
+      const isEnd=(drag.i===0||drag.i===data.length-1);
+      if(!(isEnd&&E.lockEndsX)) p.x=clamp(invX(mx),0,L);
+      p.v=clamp(invV(my)-off(p.x),E.min,VM*1.05);
+      keepSorted(data,drag.i);
+    }
+    rebuild();drawEditor(name);syncBar(name);
+  } else if(e.type==='pointerup'){drag=null;}
+}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function keepSorted(d,i){if(i>0)d[i].x=Math.max(d[i].x,d[i-1].x+5);if(i<d.length-1)d[i].x=Math.min(d[i].x,d[i+1].x-5);}
+function syncBar(name){
+  const E=EDS[name],p=E.data()[sel[name]];if(!p)return;
+  const xi=document.getElementById(E.xb),vi=document.getElementById(E.vb);
+  xi.value=p.x.toFixed(0);vi.value=p.v.toFixed(1);
+  xi.disabled=(E.lockEndsX&&(sel[name]===0||sel[name]===E.data().length-1));
+}
+['outline','rocker','thick'].forEach(name=>{
+  const E=EDS[name];
+  ['x','v'].forEach(f=>{document.getElementById(f==='x'?E.xb:E.vb).onchange=ev=>{
+    const p=E.data()[sel[name]],val=parseFloat(ev.target.value);
+    if(!isNaN(val)){p[f]=val;keepSorted(E.data(),sel[name]);rebuild();drawEditor(name);syncBar(name);}};});
+});
+document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{
+  const name=b.dataset.add,d=EDS[name].data(),i=Math.max(1,Math.min(sel[name]+1,d.length-1));
+  const nx=(d[i-1].x+d[i].x)/2,nv=curveFn(d)(nx);
+  d.splice(i,0,autoHandles([{x:nx,v:nv}])[0]);sel[name]=i;rebuild();drawEditor(name);syncBar(name);
+});
+document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+  const name=b.dataset.del,d=EDS[name].data(),s=sel[name];
+  if(s>0&&s<d.length-1&&d.length>3){d.splice(s,1);sel[name]=Math.max(1,s-1);rebuild();drawEditor(name);syncBar(name);}
+});
+
+/* ============================================================
+   SECTION EDITOR — editable deck + bottom curves with handles
+   ============================================================ */
+let secSel={curve:'deck',i:1};
+function secMapper(){
+  const cv=document.getElementById('cv-sect'),w=cv.clientWidth,h=cv.clientHeight,pad={l:16,r:16,t:18,b:24};
+  const s=board.sections[activeSection];
+  const halfW=curveFn(board.outline)(s.x)/2, t=curveFn(board.thick)(s.x);
+  const X=u=>pad.l+u*(w-pad.l-pad.r);                       // u 0..1 left→right (stringer→rail)
+  const span=h-pad.t-pad.b, zTop=1.15, zBot=-0.35;          // frac of thickness shown
+  const Y=zf=>pad.t+(zTop-zf)/(zTop-zBot)*span;
+  const invU=px=>clamp((px-pad.l)/(w-pad.l-pad.r),0,1);
+  const invZ=py=>zTop-(py-pad.t)/span*(zTop-zBot);
+  return {cv,w,h,pad,X,Y,invU,invZ,halfW,t,s};
+}
+function drawSection(){
+  const M=secMapper();const {cv,w,h,X,Y,s,halfW,t}=M;
+  const dpr=Math.min(devicePixelRatio,2);cv.width=w*dpr;cv.height=h*dpr;
+  const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
+  // datums: stringer (u=0) and rocker baseline (z=0)
+  g.strokeStyle='#3a5260';g.setLineDash([4,3]);
+  g.beginPath();g.moveTo(X(0),M.pad.t);g.lineTo(X(0),h-M.pad.b);g.stroke();
+  g.beginPath();g.moveTo(X(0),Y(0));g.lineTo(X(1),Y(0));g.stroke();g.setLineDash([]);
+  g.fillStyle='#5e7079';g.font='9px monospace';
+  g.fillText('⌀ stringer',X(0)+4,M.pad.t+8);g.fillText('baseline',X(1)-46,Y(0)-4);g.fillText('rail',X(1)-22,M.pad.t+8);
+  // both curves (and mirror to show full section faintly)
+  drawSecCurve(g,M,s.deck,'#34d3c0','deck');
+  drawSecCurve(g,M,s.bot,'#7fd4ff','bot');
+  // mirror outlines (left half) faint
+  g.globalAlpha=0.28;
+  mirrorCurve(g,M,s.deck,'#34d3c0');mirrorCurve(g,M,s.bot,'#7fd4ff');g.globalAlpha=1;
+  g.fillStyle='#7d909b';g.font='10px monospace';
+  g.fillText(`W ${(halfW*2).toFixed(0)}  ·  T ${t.toFixed(1)}`,M.pad.l,h-7);
+}
+function drawSecCurve(g,M,nodes,col,which){
+  const poly=samplePoly(nodes,28);
+  g.strokeStyle=col;g.lineWidth=2;g.beginPath();
+  poly.forEach((p,i)=>{const px=M.X(p.x),py=M.Y(p.v);i?g.lineTo(px,py):g.moveTo(px,py);});g.stroke();
+  const selThis=(secSel.curve===which);
+  nodes.forEach((p,i)=>{
+    const px=M.X(p.x),py=M.Y(p.v),on=(selThis&&secSel.i===i);
+    if(on){[['hl',p.hlx,p.hlv,0],['hr',p.hrx,p.hrv,1]].forEach(([,dx,dv,k])=>{
+      if((i===0&&k===0)||(i===nodes.length-1&&k===1))return;
+      const hx=M.X(p.x+dx),hy=M.Y(p.v+dv);
+      g.strokeStyle='#ffb454';g.lineWidth=1;g.beginPath();g.moveTo(px,py);g.lineTo(hx,hy);g.stroke();
+      g.fillStyle='#ffb454';g.fillRect(hx-3,hy-3,6,6);});}
+    g.fillStyle=on?'#ffb454':col;g.beginPath();g.arc(px,py,on?5:3.5,0,7);g.fill();
+    if(p.smooth){g.strokeStyle=on?'#ffb454':col;g.lineWidth=1;g.beginPath();g.arc(px,py,on?8:6,0,7);g.stroke();}
+  });
+}
+function mirrorCurve(g,M,nodes,col){
+  const poly=samplePoly(nodes,28);g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();
+  poly.forEach((p,i)=>{const px=M.X(-p.x)+(M.X(0)-M.pad.l)*0; // mirror about stringer
+    const mx=2*M.X(0)-M.X(p.x),py=M.Y(p.v);i?g.lineTo(mx,py):g.moveTo(mx,py);});g.stroke();
+}
+function secPointer(e){
+  const M=secMapper();const {cv,X,Y,invU,invZ}=M;
+  const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+  const curves={deck:M.s.deck,bot:M.s.bot};
+  if(e.type==='pointerdown'){
+    // handle of current selection first
+    const cur=curves[secSel.curve],p=cur&&cur[secSel.i];
+    if(p){for(const k of ['hl','hr']){const hx=X(p.x+(k==='hl'?p.hlx:p.hrx)),hy=Y(p.v+(k==='hl'?p.hlv:p.hrv));
+      if(Math.hypot(hx-mx,hy-my)<10){drag={sec:true,curve:secSel.curve,i:secSel.i,h:k};return;}}}
+    // nearest node across both curves
+    let bc=null,bi=-1,bd=1e9;
+    for(const c of ['deck','bot'])curves[c].forEach((p,i)=>{const d=Math.hypot(X(p.x)-mx,Y(p.v)-my);if(d<bd){bd=d;bc=c;bi=i;}});
+    if(bd<16){secSel={curve:bc,i:bi};drag={sec:true,curve:bc,i:bi,h:null};syncHandleUI();drawSection();}
+  } else if(e.type==='pointermove'&&drag&&drag.sec){
+    const arr=curves[drag.curve],p=arr[drag.i];
+    if(drag.h){
+      let du=invU(mx)-p.x,dz=invZ(my)-p.v;
+      [du,dz]=lockDelta(du,dz);
+      if(drag.h==='hr'){du=Math.max(0,du);if(drag.i<arr.length-1)du=Math.min(du,arr[drag.i+1].x-p.x);p.hrx=du;p.hrv=dz;}
+      else{du=Math.min(0,du);if(drag.i>0)du=Math.max(du,arr[drag.i-1].x-p.x);p.hlx=du;p.hlv=dz;}
+      if(p.smooth){const sx=M.X(1)-M.X(0),sy=M.Y(1)-M.Y(0);enforceSmooth(p,drag.h,sx,sy);}
+    } else {
+      const isEnd=(drag.i===0||drag.i===arr.length-1);
+      // u=0 (stringer) and u=1 (rail) stay locked in u; deck[0]/bot[0] z locked
+      if(!isEnd)p.x=clamp(invU(mx),0.02,0.98);
+      if(!(drag.curve==='deck'&&drag.i===0)&&!(drag.curve==='bot'&&drag.i===0))
+        p.v=clamp(invZ(my),-0.4,1.2);
+      if(drag.i>0&&drag.i<arr.length-1){if(arr[drag.i-1])p.x=Math.max(p.x,arr[drag.i-1].x+0.02);if(arr[drag.i+1])p.x=Math.min(p.x,arr[drag.i+1].x-0.02);}
+    }
+    invalidateSections();rebuild();drawSection();
+  } else if(e.type==='pointerup'){drag=null;}
+}
+function buildStationTabs(){
+  const box=document.getElementById('station-tabs');box.innerHTML='';
+  board.sections.forEach((s,i)=>{const b=document.createElement('button');
+    b.textContent='@'+s.x.toFixed(0);b.className=i===activeSection?'on':'';
+    b.onclick=()=>{activeSection=i;secSel={curve:'deck',i:1};syncSec();};box.appendChild(b);});
+}
+function syncSec(){document.getElementById('sec-x').value=board.sections[activeSection].x.toFixed(0);buildStationTabs();drawSection();}
+document.getElementById('sec-x').onchange=e=>{const v=parseFloat(e.target.value);
+  if(!isNaN(v)){board.sections[activeSection].x=clamp(v,0,len());invalidateSections();rebuild();syncSec();}};
+document.getElementById('sec-add').onclick=()=>{
+  const ss=[...board.sections].sort((a,b)=>a.x-b.x);const nx=clamp(len()*0.5,0,len());
+  const base=board.sections[activeSection];
+  board.sections.push(mkSection(nx,
+    base.deck.map(p=>[p.x,p.v]),base.bot.map(p=>[p.x,p.v])));
+  activeSection=board.sections.length-1;invalidateSections();rebuild();syncSec();};
+document.getElementById('sec-del').onclick=()=>{if(board.sections.length>2){
+  board.sections.splice(activeSection,1);activeSection=0;invalidateSections();rebuild();syncSec();}};
+
+/* ============================================================
+   TABS + boot
+   ============================================================ */
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.editor').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');document.getElementById('ed-'+b.dataset.tab).classList.add('on');
+  requestAnimationFrame(redrawActive);
+});
+function redrawActive(){
+  ['outline','rocker','thick'].forEach(n=>{
+    if(document.getElementById('ed-'+n).classList.contains('on')){drawEditor(n);syncBar(n);}});
+  if(document.getElementById('ed-sect').classList.contains('on'))drawSection();
+  syncHandleUI();
+}
+['outline','rocker','thick'].forEach(name=>{const cv=document.getElementById(EDS[name].cv);
+  cv.addEventListener('pointerdown',e=>pointer(name,e));
+  cv.addEventListener('pointermove',e=>pointer(name,e));
+  addEventListener('pointerup',e=>pointer(name,e));});
+const sc=document.getElementById('cv-sect');
+sc.addEventListener('pointerdown',secPointer);sc.addEventListener('pointermove',secPointer);
+addEventListener('pointerup',secPointer);
+
+document.getElementById('cb-parallel').onchange=e=>{
+  const n=currentNode(); if(!n)return;
+  n.smooth=e.target.checked;
+  if(n.smooth){const [sx,sy]=currentScales(); enforceSmooth(n,'hr',sx,sy);}
+  invalidateSections(); rebuild();
+  const t=activeTab(); if(t==='sect')drawSection(); else drawEditor(t);
+};
+document.getElementById('btn-lock').onclick=()=>{
+  handleLock = handleLock==='free'?'vert':handleLock==='vert'?'horiz':'free';
+  document.getElementById('lock-lbl').textContent =
+    handleLock==='free'?'Free':handleLock==='vert'?'Vertical':'Horizontal';
+};
+
+initGL();
+buildStationTabs();
+requestAnimationFrame(()=>{drawEditor('outline');syncBar('outline');syncHandleUI();});
+</script>
